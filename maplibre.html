@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <title>Add a video</title>
+    <meta property="og:description" content="Display a video on top of a satellite raster baselayer." />
+    <meta charset='utf-8'>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel='stylesheet' href='https://unpkg.com/maplibre-gl@3.3.1/dist/maplibre-gl.css' />
+    <script src='https://unpkg.com/maplibre-gl@3.3.1/dist/maplibre-gl.js'></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+        }
+
+        html,
+        body,
+        #map {
+            height: 100%;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="map"></div>
+    <script>
+        let stac_api = "STAC\\STAC_Truck.geojson"; // your STAC API url
+        let stac_collection_id = "<STAC_COLLECTION_NAME>"; // your STAC collection name
+        let stac_item_id = "<STAC_ITEM_ID>"; // your STAC item ID
+        let presigned_api = "<PRESIGNED_URL_PROXY_API>"; // your presigned url proxy api
+        let mapbox_api_token = "pk.eyJ1IjoiYW5zaWIxZSIsImEiOiJjbG1hNGZkdjQwbjZzM3BsNm11ZDQ4OWd1In0.Qo2YS-Tqao72xPtUwvcIVg"; // your Mapbox API token
+
+        // let item_endpoint = `${stac_api}/collections/${stac_collection_id}/items/${stac_item_id}`;
+        let item_endpoint = "STAC\\STAC_Truck.geojson"
+        let sync_camera = false; // if true, camera location will always be set to the sensor location
+        let terrain_on = false;
+
+        let frame_geom_data;
+        let sensor_centers;
+        let frame_centers;
+
+        // this function returns a POST body for an api/lambda integration
+        // that will return a presigned url for the given s3 key
+        function createPresignedRequestBody(key) {
+            return {
+                method: "POST",
+                headers: {
+                    Accept: "application/json",
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ object_key: key }),
+                redirect: "follow",
+            };
+        }
+        // fetch the STAC item json
+        fetch(item_endpoint)
+            .then((res) => res.json())
+            .then((stac_item_json) => {
+                // parse properties and hrefs from item
+                let start_dt = Date.parse(
+                    stac_item_json["properties"]["start_datetime"]
+                );
+                let end_dt = Date.parse(stac_item_json["properties"]["end_datetime"]);
+                let totalSeconds = (end_dt - start_dt) / 1000;
+
+                let video_href = stac_item_json["assets"]["video"]["href"];
+                let frame_geom_href =
+                    stac_item_json["assets"]["video:frame_geometries"]["href"];
+                let frame_centers_href =
+                    stac_item_json["assets"]["video:frame_centers"]["href"];
+                let sensor_centers_href =
+                    stac_item_json["assets"]["video:sensor_centers"]["href"];
+
+                let frame_geom_data, frame_centers_data, sensor_centers_data;
+                let frame_geom_presigned,
+                    frame_centers_presigned,
+                    sensor_centers_presigned,
+                    video_presigned;
+
+                video_presigned = video_href;
+                frame_centers_presigned = frame_centers_href;
+                frame_geom_presigned = frame_geom_href;
+                sensor_centers_presigned = sensor_centers_href;
+
+
+                // fetch the geojson files
+                Promise.all([
+                    fetch(frame_geom_presigned)
+                        .then((resp) => resp.json())
+                        .then((asset_json) => {
+                            frame_geom_data = asset_json;
+                        }),
+                    fetch(frame_centers_presigned)
+                        .then((resp) => resp.json())
+                        .then((asset_json) => {
+                            frame_centers_data = asset_json;
+                        }),
+                    fetch(sensor_centers_presigned)
+                        .then((resp) => resp.json())
+                        .then((asset_json) => {
+                            sensor_centers_data = asset_json;
+                        }),
+                ]).then(() => {
+                    console.log(sensor_centers_data)
+                    // Map Libre JavaScript
+                    const videoStyle = {
+                        version: 8,
+                        sources: {
+                            satellite: {
+                                type: "raster",
+                                url: "https://api.maptiler.com/tiles/satellite/tiles.json?key=get_your_own_OpIi9ZULNHzrESv6T2vL",
+                                tileSize: 256,
+                            },
+                            video: {
+                                type: "video",
+                                urls: [video_presigned],
+                                coordinates: frame_geom_data["features"][0]["geometry"][
+                                    "coordinates"
+                                ][0].slice(0, 4),
+                            },
+                        },
+                        layers: [
+                            {
+                                id: "background",
+                                type: "background",
+                                paint: {
+                                    "background-color": "rgb(4,7,14)",
+                                },
+                            },
+                            {
+                                id: "satellite",
+                                type: "raster",
+                                source: "satellite",
+                            },
+                            {
+                                id: "video",
+                                type: "raster",
+                                source: "video",
+                                paint: {
+                                    "raster-opacity": 1,
+                                    "raster-fade-duration": 0
+                                }
+                            },
+                        ],
+                    };
+
+                    const map = new maplibregl.Map({
+                        container: 'map',
+                        minZoom: 14,
+                        zoom: 17,
+                        center: frame_centers_data["features"][0]["geometry"]["coordinates"],
+                        bearing: 90,
+                        style: videoStyle
+                    });
+
+                    map.addControl(
+                        new maplibregl.NavigationControl({
+                            visualizePitch: true,
+                            showZoom: true,
+                        })
+                    );
+                       
+                    let playingVideo = true;
+                    let totalFrames = frame_geom_data["features"].length;
+                    // refresh the video corner coordinates, and optionally, camera location
+                    function sourceCallback() {
+                        let timer_created = false;
+                        if (map.getSource("video") && map.isSourceLoaded("video")) {
+                            if (!timer_created) {
+                                setInterval(function () {
+                                    updateVideoCoords();
+                                }, 30);
+                                
+                                function updateVideoCoords() {
+                                    let curSeconds = map.getSource("video").video.currentTime;
+                                    let curFrameIndex = parseInt(
+                                        (curSeconds / totalSeconds) * totalFrames
+                                    );
+                                    console.log("Frame: " + curFrameIndex);
+                                    let curFrameGeometry =
+                                        frame_geom_data["features"][curFrameIndex]["geometry"];
+                                    let curFrameProperties =
+                                        frame_geom_data["features"][curFrameIndex]["properties"];
+                                    //console.log(frame_geom_data["features"][curFrameIndex]["geometry"][
+                                    //    "coordinates"
+                                    //][0].slice(0, 4).toString());
+                                    //map.panTo(frame_centers_data["features"][curFrameIndex]["geometry"]["coordinates"]);
+                                    console.log(curFrameProperties)
+                                    map.getSource('video').setCoordinates(frame_geom_data["features"][curFrameIndex]["geometry"][
+                                        "coordinates"
+                                    ][0].slice(0, 4));
+                                    //map.zoomTo(frame_centers_data["features"][curFrameIndex]["geometry"]["coordinates"]);
+                                }
+                            }
+                            timer_created = true;
+
+
+                        };
+                    };
+                    map.on('click', () => {
+                        playingVideo = !playingVideo;
+
+                        if (playingVideo) map.getSource('video').play();
+                        else map.getSource('video').pause();
+                    });
+
+                    // start refreshing the video
+                    map.on("sourcedata", sourceCallback);
+                });
+            });
+    </script>
+</body>
+
+</html>

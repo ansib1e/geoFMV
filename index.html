@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="utf-8" />
+  <title>geoFMV</title>
+  <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <link href="https://api.mapbox.com/mapbox-gl-js/v2.7.0/mapbox-gl.css" rel="stylesheet" />
+  <script src="https://api.mapbox.com/mapbox-gl-js/v2.7.0/mapbox-gl.js"></script>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+    }
+
+    #map {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 100%;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="map"></div>
+  <button id="toggleCameraSync" style="position: absolute; top: 10px; left: 50%; transform: translateX(-50%);">Sync Sensor</button>
+  <div id="frameCounter"
+    style="position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.5); padding: 5px; border-radius: 3px; color: white;">
+    Frame: 0</div>
+
+  <div id="timestampCounter"
+    style="position: absolute; top: 40px; left: 10px; background: rgba(0,0,0,0.5); padding: 5px; border-radius: 3px; color: white;">
+    ISO DateTime: 00:00:00</div>
+  <div
+    style="position: absolute; top: 70px; left: 10px; background: rgba(0,0,0,0.5); padding: 5px; border-radius: 3px; color: white;">
+
+    <span id="timeValue">0
+    </span><input id="timeSlider" type="range" min="0" max="1" step="0.01" value="0">
+    <span id="totalDuration">0</span>
+  </div>
+  <div
+    style="position: absolute; top: 105px; left: 10px; background: rgba(0,0,0,0.5); padding: 5px; border-radius: 3px; color: white;">
+    Pitch °:
+    <input id="pitchAngleSlider" type="range" min="0" max="90" step=".1" value="25">
+    <span id="pitchValue">25</span>°
+  </div>
+
+
+  <script>
+    // ======================= geoFMV Front-End UI JavaScript  =======================
+    function formatTime(seconds) {
+      let hours = Math.floor(seconds / 3600);
+      let minutes = Math.floor((seconds % 3600) / 60);
+      let secs = Math.floor(seconds % 60);
+
+      // Pad the time values with leading zeros if they are single digit
+      hours = (hours < 10) ? "0" + hours : hours;
+      minutes = (minutes < 10) ? "0" + minutes : minutes;
+      secs = (secs < 10) ? "0" + secs : secs;
+
+      return hours + ":" + minutes + ":" + secs;
+    }
+
+    document.addEventListener("DOMContentLoaded", function () {
+      const syncButton = document.getElementById('toggleCameraSync');
+
+      syncButton.addEventListener('click', function () {
+        sync_camera = !sync_camera;
+        console.log('Camera Sync: ' + (sync_camera ? 'ON' : 'OFF'))
+        if (this.textContent === 'Freelook') {
+            this.textContent = 'Sync Sensor';
+        } else {
+            this.textContent = 'Freelook';
+        }
+      });
+    });
+    let lastTime = Date.now();
+    let frames = 0;
+
+
+    // ====================== STAC API + MapBox JavaScript =======================
+    let stac_api = "STAC\\STAC_Truck.geojson"; // your STAC API url
+    let stac_collection_id = "<STAC_COLLECTION_NAME>"; // your STAC collection name
+    let stac_item_id = "<STAC_ITEM_ID>"; // your STAC item ID
+    let presigned_api = "<PRESIGNED_URL_PROXY_API>"; // your presigned url proxy api
+    let mapbox_api_token = "pk.eyJ1IjoiYW5zaWIxZSIsImEiOiJjbG1hNGZkdjQwbjZzM3BsNm11ZDQ4OWd1In0.Qo2YS-Tqao72xPtUwvcIVg"; // your Mapbox API token
+
+    // let item_endpoint = `${stac_api}/collections/${stac_collection_id}/items/${stac_item_id}`;
+    let item_endpoint = "STAC\\STAC_Truck.geojson"
+    let sync_camera = true; // if true, camera location will always be set to the sensor location
+    let terrain_on = false;
+    let zoom_input = 0.1;
+    let pitch_angle_input = 25;
+
+    let frame_geom_data;
+    let sensor_centers;
+    let frame_centers;
+
+    // this function returns a POST body for an api/lambda integration
+    // that will return a presigned url for the given s3 key
+    function createPresignedRequestBody(key) {
+      return {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ object_key: key }),
+        redirect: "follow",
+      };
+    }
+
+    // fetch the STAC item json
+    fetch(item_endpoint)
+      .then((res) => res.json())
+      .then((stac_item_json) => {
+        // parse properties and hrefs from item
+        let start_dt = Date.parse(
+          stac_item_json["properties"]["start_datetime"]
+        );
+        let end_dt = Date.parse(stac_item_json["properties"]["end_datetime"]);
+        let totalSeconds = (end_dt - start_dt) / 1000;
+
+        let video_href = stac_item_json["assets"]["video"]["href"];
+        let frame_geom_href =
+          stac_item_json["assets"]["video:frame_geometries"]["href"];
+        let frame_centers_href =
+          stac_item_json["assets"]["video:frame_centers"]["href"];
+        let sensor_centers_href =
+          stac_item_json["assets"]["video:sensor_centers"]["href"];
+
+        let frame_geom_data, frame_centers_data, sensor_centers_data;
+        let frame_geom_presigned,
+          frame_centers_presigned,
+          sensor_centers_presigned,
+          video_presigned;
+
+        video_presigned = video_href;
+        frame_centers_presigned = frame_centers_href;
+        frame_geom_presigned = frame_geom_href;
+        sensor_centers_presigned = sensor_centers_href;
+
+        mapboxgl.accessToken = mapbox_api_token;
+
+        // fetch the geojson files
+        Promise.all([
+          fetch(frame_geom_presigned)
+            .then((resp) => resp.json())
+            .then((asset_json) => {
+              frame_geom_data = asset_json;
+            }),
+          fetch(frame_centers_presigned)
+            .then((resp) => resp.json())
+            .then((asset_json) => {
+              frame_centers_data = asset_json;
+            }),
+          fetch(sensor_centers_presigned)
+            .then((resp) => resp.json())
+            .then((asset_json) => {
+              sensor_centers_data = asset_json;
+            }),
+        ]).then(() => {
+          // create video style
+          const videoStyle = {
+            version: 8,
+            sources: {
+              satellite: {
+                type: "raster",
+                url: "mapbox://mapbox.satellite",
+                tileSize: 256,
+              },
+              video: {
+                type: "video",
+                urls: [video_presigned],
+                coordinates: frame_geom_data["features"][0]["geometry"][
+                  "coordinates"
+                ][0].slice(0, 4),
+              },
+            },
+            layers: [
+              {
+                id: "background",
+                type: "background",
+                paint: {
+                  "background-color": "rgb(4,7,14)",
+                },
+              },
+              {
+                id: "satellite",
+                type: "raster",
+                source: "satellite",
+              },
+              {
+                id: "video",
+                type: "raster",
+                source: "video",
+                paint: {
+                  "raster-opacity": 1,
+                  "raster-fade-duration": 0
+                }
+              },
+            ],
+          };
+
+          // create map, including video style
+          const map = new mapboxgl.Map({
+            container: "map",
+            zoom: 16,
+            center:
+              frame_centers_data["features"][0]["geometry"]["coordinates"],
+            bearing: 90,
+            style: videoStyle,
+          });
+
+          map.addControl(
+            new mapboxgl.NavigationControl({
+              visualizePitch: true,
+              showZoom: true,
+            })
+          );
+
+          let playingVideo = true;
+          map.on('click', () => {
+            playingVideo = !playingVideo;
+
+            if (playingVideo) {
+              map.getSource('video').play();
+              map.triggerRepaint();
+            }
+            else {
+              map.getSource('video').pause();
+              map.triggerRepaint();
+            }
+          });
+
+          map.on('load', function () {
+            const videoSource = map.getSource("video");
+            const totalDuration = videoSource.video.duration;
+            document.getElementById('totalDuration').innerText = formatTime(totalDuration);
+            document.getElementById('timeSlider').max = totalDuration;
+            // Add a listener for the wheel event to handle zoom
+            map.getCanvas().addEventListener('wheel', function (e) {
+              if (sync_camera) {  // Check if sync_camera is ON
+                e.preventDefault(); // Prevent default zoom behavior of the map
+
+                const zoomAdjustment = 0.01; // Define how much you want to adjust zoom per scroll event
+                if (e.deltaY > 0) {
+                  // Scrolling down
+                  zoom_input = Math.min(parseFloat(zoom_input) + zoomAdjustment, 10); // The max value of the slider is 10
+                } else if (e.deltaY < 0) {
+                  // Scrolling up
+                  zoom_input = Math.max(parseFloat(zoom_input) - zoomAdjustment, 0); // The min value of the slider is 0
+                }
+
+                // Update the zoomSlider value and text display
+                document.getElementById('zoomSlider').value = zoom_input;
+                document.getElementById('zoomValue').innerText = zoom_input;
+              }
+            });
+          });
+          /**
+          document.getElementById('zoomSlider').addEventListener('input', function (e) {
+            if (sync_camera != true)
+              sync_camera = !sync_camera;
+            console.log('Camera Sync: ' + (sync_camera ? 'ON' : 'OFF'))
+            const zoomValue = e.target.value;
+            document.getElementById('zoomValue').innerText = zoomValue;
+            zoom_input = zoomValue;
+          });
+          **/
+          document.getElementById('timeSlider').addEventListener('input', function (e) {
+            const timeValue = parseFloat(e.target.value);
+            const videoSource = map.getSource("video");
+            videoSource.video.currentTime = timeValue;
+            document.getElementById('timeValue').innerText = timeValue.toFixed(2);
+            if (sync_camera != true)
+              sync_camera = !sync_camera;
+            console.log('Camera Sync: ' + (sync_camera ? 'ON' : 'OFF'))
+          });
+
+          document.getElementById('timeSlider').addEventListener('mousedown', function () {
+            const videoSource = map.getSource("video");
+            videoSource.video.pause();
+          });
+
+          document.getElementById('timeSlider').addEventListener('mouseup', function () {
+            const videoSource = map.getSource("video");
+            videoSource.video.play();
+          });
+          document.getElementById('pitchAngleSlider').addEventListener('input', function (e) {
+            const pitchValue = e.target.value;
+            document.getElementById('pitchValue').innerText = pitchValue;
+            pitch_angle_input = parseFloat(pitchValue);
+          });
+
+          let totalFrames = frame_geom_data["features"].length;
+
+          const camera = map.getFreeCameraOptions();
+
+          // start refreshing the video
+          map.on("sourcedata", sourceCallback);
+
+
+          // refresh the video corner coordinates, and optionally, camera location
+          function sourceCallback() {
+            let timer_created = false;
+            let prevFrameIndex = -1; // start with an invalid frame number
+
+            if (map.getSource("video") && map.isSourceLoaded("video") && playingVideo) {
+              if (!timer_created) {
+                const timer = setInterval(() => {
+
+                  let curSeconds = map.getSource("video").video.currentTime;
+                  // Calculate the current frame
+                  let curFrameIndex = parseInt(
+                    (curSeconds / totalSeconds) * totalFrames
+                  );
+                  // Calculate the current timestamp
+                  let currentTimestamp = new Date(start_dt + curSeconds * 1000); // Convert seconds to milliseconds and add to start time
+                  let isoTimestamp = `Sensor DateTime: ${currentTimestamp.toISOString()}`;
+
+
+                  // Update the frame counter
+                  document.getElementById('frameCounter').innerText = 'Frame: ' + curFrameIndex;
+                  // Update the timestamp 
+                  document.getElementById('timestampCounter').innerText = isoTimestamp;
+
+                  // Update Timslider
+                  document.getElementById('timeSlider').value = curSeconds;
+                  document.getElementById('timeValue').innerText = formatTime(curSeconds);
+
+
+
+                  if (curFrameIndex !== prevFrameIndex) {
+                    updateVideoCoords(curFrameIndex);
+                  }
+                  prevFrameIndex = curFrameIndex;
+
+                }, totalSeconds / totalFrames * 1000); // Dynamic interval based on video frame rate
+
+                function updateVideoCoords(curFrameIndex) {
+                  //console.log("Frame #: " + curFrameIndex);
+                  let curFrameGeometry = frame_geom_data["features"][curFrameIndex];
+                  map.getSource("video").setCoordinates(curFrameGeometry["geometry"]["coordinates"][0].slice(0, 4));
+
+                  if (sync_camera) {
+                    let curSensorGeometry = sensor_centers_data["features"][curFrameIndex]["geometry"]["coordinates"];
+                    let curFrameCenter = frame_centers_data["features"][curFrameIndex]["geometry"]["coordinates"];
+
+
+                    let zoomed_alt;
+                    if (terrain_on) {
+                      zoomed_alt = zoom_input * (curSensorGeometry[1] + curFrameCenter[1]) + curSensorGeometry[1];
+                    } else {
+                      zoomed_alt = (zoom_input * pitch_angle_input * (curSensorGeometry[1] + curFrameCenter[1])) + curFrameCenter[1];
+
+                    }
+
+                    // Update camera pitch and bearing
+                    //console.log(zoomed_alt)
+                    camera.position = mapboxgl.MercatorCoordinate.fromLngLat({
+                      lng: (zoom_input * 0.5 * (curSensorGeometry[0] - curFrameCenter[0])) + curFrameCenter[0],
+                      lat: (zoom_input * 0.5 * (curSensorGeometry[1] - curFrameCenter[1])) + curFrameCenter[1],
+                    }, zoomed_alt);
+
+                    camera.lookAtPoint({
+                      lng: curFrameCenter[0],
+                      lat: curFrameCenter[1],
+                    });
+
+                    map.setFreeCameraOptions(camera);
+                  }
+                }
+
+                timer_created = true;
+              }
+            }
+          }
+
+
+
+        });
+      });
+  </script>
+</body>
+
+</html>

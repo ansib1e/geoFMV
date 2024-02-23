@@ -1,0 +1,108 @@
+{
+    "type": "Feature",
+    "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+            [
+                [
+                    -104.85073849973291,
+                    41.10766991449452
+                ],
+                [
+                    -104.84982752222506,
+                    41.10676809253951
+                ],
+                [
+                    -104.85125578846854,
+                    41.10598529277145
+                ],
+                [
+                    -104.85211641043576,
+                    41.106836759185825
+                ],
+                [
+                    -104.85073849973291,
+                    41.10766991449452
+                ]
+            ]
+        ]
+    },
+    "properties": {
+        "title": "STAC_Truck",
+        "description": "STAC Item w/ FMV Video Extension Metadata for the 'Truck.ts' video file.",
+        "start_datetime": "2012-09-19 20:50:26.484970+00:00",
+        "end_datetime": "2012-09-19 20:52:54.096274+00:00",
+        "proj:epsg": 4326,
+        "video:frame_rate": 29.97002997002997,
+        "video:frame_count": 4441,
+        "video:shape": [
+            1080,
+            1920
+        ],
+        "video:codec_name": "avc1",
+        "video:sensor_name": "IR Mitsubishi PtSi Model 500",
+        "video:miis_core_id": "0170 F592 F023 7336 4AF8 AA91 62C0 0F2E B2DA 16B7 4341 0008 41A0 BE36 5B5A B96A 3645",
+        "datetime": "2012-09-19 20:50:26.484970+00:00"
+    },
+    "stac_version": "1.0.0",
+    "id": "1",
+    "bbox": [
+        -104.85211641043576,
+        41.106836759185825,
+        -104.84982752222506,
+        41.10676809253951
+    ],
+    "links": [
+        {
+            "rel": "self",
+            "href": "STAC/STAC_Truck.geojson",
+            "type": "application/json"
+        }
+    ],
+    "assets": {
+        "video": {
+            "href": "STAC/Truck.mp4",
+            "type": "video/mp2t",
+            "title": "Truck.ts",
+            "roles": [
+                "data",
+                "video",
+                "group:video"
+            ]
+        },
+        "video:frame_centers": {
+            "title": "frame_centers",
+            "href": "STAC/frame_centers.geojson",
+            "type": "application/geo+json",
+            "roles": [
+                "metadata",
+                "video:frame_centers",
+                "group:video1"
+            ]
+        },
+        "video:frame_geometries": {
+            "title": "frame_geometries",
+            "href": "STAC/frame_geoms.geojson",
+            "type": "application/geo+json",
+            "roles": [
+                "metadata",
+                "video:frame_geometries",
+                "group:video1"
+            ]
+        },
+        "video:sensor_centers": {
+            "title": "sensor_centers",
+            "href": "STAC/sensor_centers.geojson",
+            "type": "application/geo+json",
+            "roles": [
+                "metadata",
+                "video:sensor_centers",
+                "group:video1"
+            ]
+        }
+    },
+    "stac_extensions": [
+        "https://stac-extensions.github.io/projection/v1.0.0/schema.json",
+        "https://stac-extensions.github.io/video/v1.0.0/schema.json"
+    ]
+}

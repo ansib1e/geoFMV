@@ -1,0 +1,108 @@
+{
+  "type": "Feature",
+  "stac_version": "1.0.0",
+  "id": "item_id",
+  "bbox": [
+    -104.8633986589329,
+    41.072271332341344,
+    -104.84970647895189,
+    41.10766991449452
+  ],
+  "properties": {
+    "title": "Example STAC item",
+    "description": "",
+    "start_datetime": "2012-09-19T20:50:26.484970Z",
+    "end_datetime": "2012-09-19T20:52:54.296682Z",
+    "proj:epsg": 4326,
+    "video:frame_rate": 29.97002997002997,
+    "video:frame_count": 4441,
+    "video:shape": [
+      1080,
+      1920
+    ],
+    "video:codec_name": "avc1",
+    "video:sensor_name": "IR Mitsubishi PtSi Model 500",
+    "video:miis_core_id": "0170 F592 F023 7336 4AF8 AA91 62C0 0F2E B2DA 16B7 4341 0008 41A0 BE36 5B5A B96A 3645",
+    "datetime": "2012-09-19T20:50:26.484970Z"
+  },
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+      [
+        [
+          -104.84970647895189,
+          41.072271332341344
+        ],
+        [
+          -104.84970647895189,
+          41.10766991449452
+        ],
+        [
+          -104.8633986589329,
+          41.10766991449452
+        ],
+        [
+          -104.8633986589329,
+          41.072271332341344
+        ],
+        [
+          -104.84970647895189,
+          41.072271332341344
+        ]
+      ]
+    ]
+  },
+  "links": [
+    {
+      "rel": "self",
+      "href": "path/to/self",
+      "type": "application/json"
+    }
+  ],
+  "assets": {
+    "video1": {
+      "href": "path/to/video.ts",
+      "type": "video/mp2t",
+      "title": "A video asset",
+      "roles": [
+        "data",
+        "video",
+        "group:video1"
+      ]
+    },
+    "video1:frame_centers": {
+      "title": "frame_centers",
+      "href": "path/to/frame_centers.geojson",
+      "type": "application/geo+json",
+      "roles": [
+        "metadata",
+        "video:frame_centers",
+        "group:video1"
+      ]
+    },
+    "video1:frame_geometries": {
+      "title": "frame_geometries",
+      "href": "path/to/frame_geometries.geojson",
+      "type": "application/geo+json",
+      "roles": [
+        "metadata",
+        "video:frame_geometries",
+        "group:video1"
+      ]
+    },
+    "video1:sensor_centers": {
+      "title": "sensor_centers",
+      "href": "path/to/sensor_centers.geojson",
+      "type": "application/geo+json",
+      "roles": [
+        "metadata",
+        "video:sensor_centers",
+        "group:video1"
+      ]
+    }
+  },
+  "stac_extensions": [
+    "https://stac-extensions.github.io/projection/v1.0.0/schema.json",
+    "https://stac-extensions.github.io/video/v1.0.0/schema.json"
+  ]
+}
